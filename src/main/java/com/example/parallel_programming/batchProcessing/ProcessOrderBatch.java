@@ -44,18 +44,13 @@ public class ProcessOrderBatch {
             logger.info("[BATCH PROCESSING] No orders found!");
             return;
         }
-
         int batchOrders = batch.size();
-
         int batchQuantity = batch.stream()
                 .mapToInt(Order::getQuantity)
                 .sum();
-
         double batchRevenue = batch.stream()
                 .mapToDouble(Order::getTotalPrice)
                 .sum();
-
-
         batch.forEach(order -> order.setProcessed(true));
         repo.saveAll(batch);
 

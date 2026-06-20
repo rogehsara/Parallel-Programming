@@ -4,6 +4,8 @@ package com.example.parallel_programming.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.io.Serializable;
+
 
 @Getter
 @Setter
@@ -12,7 +14,7 @@ import lombok.*;
 @Data
 @Table(name = "Products")
 @Entity
-public class Product {
+public class Product implements Serializable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -11,14 +11,14 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(InvalidStockException.class)
-    public ResponseEntity<?> handleInvalidStockException(InvalidStockException e) {
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<?> handleException(Exception e) {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(
                         Map.of(
                         "time Stamp", LocalTime.now(),
-                        "error" , "Invalid Stock Operation",
+                        "error" , "SomeThing went wrong",
                         "message", e.getMessage()
                         )
                 );

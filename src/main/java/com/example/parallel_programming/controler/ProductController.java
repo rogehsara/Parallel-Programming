@@ -3,6 +3,7 @@ package com.example.parallel_programming.controler;
 
 import com.example.parallel_programming.entity.Product;
 import com.example.parallel_programming.services.ProductService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -64,5 +65,21 @@ public class ProductController {
         productService.decreaseStockAsync(id, amount);
 
         return ResponseEntity.ok("Request submitted");
+    }
+
+    @Value("${server.port}")
+    private String port;
+
+    @GetMapping("/instance")
+    public String instance() {
+        if (port.equals("8082")){
+            try {
+                Thread.sleep(20000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        System.out.println(System.getProperty("server.port"));
+        return port;
     }
 }

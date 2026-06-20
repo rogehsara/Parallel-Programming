@@ -9,9 +9,15 @@ import com.example.parallel_programming.repository.OrderRepo;
 import com.example.parallel_programming.repository.ProductRepo;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import jakarta.transaction.Transactional;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.AsyncResult;
 import org.springframework.stereotype.Service;
@@ -22,6 +28,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
 @Service
@@ -31,15 +38,19 @@ public class ProductService {
     ProductRepo productRepo;
     StockEventProducer producer;
     OrderRepo orderRepo;
+    TransactionService transactionService;
+    RedissonClient redisson;
     Logger logger = LoggerFactory.getLogger(ProductService.class);
     private final ObjectMapper objectMapper;
     private static final String SUMMARY_FILE_PATH = "batch-summary.json";
 
 
-    public ProductService(ProductRepo productRepo, StockEventProducer producer, OrderRepo orderRepo) {
+    public ProductService(ProductRepo productRepo, StockEventProducer producer, OrderRepo orderRepo, TransactionService transactionService, RedissonClient redisson) {
         this.productRepo = productRepo;
         this.producer = producer;
         this.orderRepo = orderRepo;
+        this.transactionService = transactionService;
+        this.redisson = redisson;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
     }
@@ -47,6 +58,7 @@ public class ProductService {
 
     ConcurrentHashMap<Long, ReentrantLock> locks = new ConcurrentHashMap<>();
 
+    @CachePut(value = "products", key = "#result.id")
     public Product addProduct(Product product) {
         return productRepo.save(product);
     }
@@ -55,14 +67,18 @@ public class ProductService {
         return productRepo.findAll();
     }
 
+    @Cacheable(value = "products", key = "#id")
     public Optional<Product> getProductById(long id) {
+        System.out.println("DB HIT for product " + id);
         return productRepo.findById(id);
     }
 
+    @CacheEvict(value = "products", key = "#id")
     public void deleteProductById(long id) {
         productRepo.deleteById(id);
     }
 
+    @CacheEvict(value = "products", key = "#updatedProduct.id")
     public Product updateProduct(Product updatedProduct) {
         Product existingProduct =
                 productRepo.findById(updatedProduct.getId()).orElseThrow(
@@ -75,47 +91,31 @@ public class ProductService {
     }
 
 
-    public Product decreaseProductQuantity(long id, int quantity) {
+    @CacheEvict(value = "products", key = "#id")
+    public Product  decreaseProductQuantity(long id, int quantity) {
 
-        ReentrantLock lock = getLock(id);
+//        ReentrantLock lock = getLock(id);
+        RLock lock = redisson.getLock("product:" + id);
         System.out.println(Thread.currentThread().getName());
 
         try {
             //Acquires the lock
-//            lock.lock();
+            boolean acquired = lock.tryLock(5, 30, TimeUnit.SECONDS);
 
-
-
-
-            Product existingProduct =
-                productRepo.findById(id).orElseThrow(
-                        () -> new RuntimeException("Product not found")
-                );
-            int existingQuantity = existingProduct.getQuantity();
-            if (existingQuantity < quantity) {
-                throw new InvalidStockException("The product is out of stock");
+            if (!acquired){
+                throw new RuntimeException("could not acquire lock");
             }
-            existingProduct.setQuantity(existingQuantity - quantity);
+
+//            lock.lock();
+            return transactionService.decreaseProduct(id, quantity);
 
 
-            producer.sendStockEvent(id, quantity);
-
-//            noQueue(existingProduct);
-
-
-            Order order = new Order(quantity, existingProduct.getPrice());
-            order.setProduct(existingProduct);
-            orderRepo.save(order);
-
-//            updateSummaryFile(1, quantity, (quantity * existingProduct.getPrice()));
-//            order.setProcessed(true);
-
-
-            
-            return productRepo.save(existingProduct);
-        }
-        finally {
-//            lock.unlock();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            if(lock.isHeldByCurrentThread()){
+                lock.unlock();
+            }
         }
     }
 
